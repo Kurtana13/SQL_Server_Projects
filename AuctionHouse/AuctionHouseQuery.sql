@@ -1,174 +1,181 @@
-drop database AuctionHouse
+DROP DATABASE IF EXISTS AuctionHouse;
+CREATE DATABASE AuctionHouse;
+GO
 
-create database AuctionHouse
+USE AuctionHouse;
+GO
 
-go
+CREATE TABLE [User](
+    Id INT IDENTITY(1,1),
+    Username VARCHAR(50) NOT NULL UNIQUE,
+    CONSTRAINT PK_User PRIMARY KEY(Id)
+);
 
-use AuctionHouse
+CREATE TABLE [Item](
+    Id INT IDENTITY(1,1),
+    [Name] VARCHAR(50) NOT NULL,
+    BuyOutPrice INT NOT NULL,
+    BaseBidPrice INT NOT NULL,
+    SellerId INT NOT NULL,
+    CONSTRAINT PK_Item PRIMARY KEY(Id),
+    CONSTRAINT FK_Item_User FOREIGN KEY(SellerId) REFERENCES [User](Id)
+);
 
-create table [User](
-Id int identity(1,1),
-Username varchar(50) not null unique,
-constraint PK_User primary key(Id)
-)
+CREATE TABLE [Bid](
+    Id INT IDENTITY(1,1),
+    BidPrice INT NOT NULL,
+    ItemId INT NOT NULL,
+    Bidder INT NOT NULL,
+    CONSTRAINT PK_Bid PRIMARY KEY(Id),
+    CONSTRAINT FK_Bid_User FOREIGN KEY(Bidder) REFERENCES [User](Id),
+    CONSTRAINT FK_Bid_Item FOREIGN KEY(ItemId) REFERENCES [Item](Id)
+);
 
-go
+CREATE PROCEDURE CreateUser 
+    @Username NVARCHAR(50)
+AS
+BEGIN
+    INSERT INTO [User](Username)
+    VALUES (@Username);
+END;
 
-create table [Item](
-Id int identity(1,1),
-[Name] varchar(50) not null,
-BuyOutPrice int not null,
-BaseBidPrice int not null,
-SellerId int not null,
-constraint PK_Item primary key(Id),
-constraint FK_Item_User foreign key(SellerId) references [User](Id)
-)
+CREATE PROCEDURE AddItem 
+    @Name NVARCHAR(50),
+    @BuyOutPrice INT,
+    @BaseBidPrice INT,
+    @SellerId INT
+AS
+BEGIN
+    INSERT INTO [Item]([Name], BuyOutPrice, BaseBidPrice, SellerId)
+    VALUES (@Name, @BuyOutPrice, @BaseBidPrice, @SellerId);
+END;
 
-go
+CREATE PROCEDURE BidOnItem 
+    @BidPrice INT,
+    @ItemId INT,
+    @BidderId INT
+AS
+BEGIN
+    DECLARE @BaseBidPrice INT;
 
-create table [Bid](
-Id int identity(1,1),
-BidPrice int not null,
-ItemId int not null,
-Bidder int not null,
-constraint PK_Bid primary key(Id),
-constraint FK_Bid_User foreign key(Bidder) references [User](Id),
-constraint FK_Bid_Item foreign Key(ItemId) references [Item](Id)
-)
+    SELECT @BaseBidPrice = BaseBidPrice
+    FROM [Item]
+    WHERE @ItemId = Id;
 
-go
+    IF @BaseBidPrice IS NOT NULL
+    BEGIN
+        IF @BidPrice > @BaseBidPrice
+        BEGIN
+            DECLARE @ExistingBidPrice INT;
 
-create procedure CreateUser @Username nvarchar(50)
-as
-Insert into [User](Username)
-values(@Username)
+            SELECT @ExistingBidPrice = BidPrice
+            FROM [Bid]
+            WHERE ItemId = @ItemId;
 
-go
+            IF @BidPrice > COALESCE(@ExistingBidPrice, 0)
+            BEGIN
+                INSERT INTO [Bid] (BidPrice, ItemId, Bidder)
+                VALUES (@BidPrice, @ItemId, @BidderId);
+            END
+            ELSE
+            BEGIN
+                RAISERROR('BidPrice must be higher than the current highest bid price.', 16, 1);
+            END;
+        END
+        ELSE
+        BEGIN
+            RAISERROR('BidPrice must be higher than BaseBidPrice.', 16, 1);
+        END;
+    END
+    ELSE
+    BEGIN
+        RAISERROR('Item does not exist.', 16, 1);
+    END;
+END;
 
-create procedure AddItem @Name nvarchar(50),@BuyOutPrice int,@BaseBidPrice int,@SellerId int
-as
-Insert into [Item]([Name],BuyOutPrice,BaseBidPrice,SellerId)
-values(@Name,@BuyOutPrice,@BaseBidPrice,@SellerId)
+CREATE PROCEDURE UserItems 
+    @Username NVARCHAR(50)
+AS
+BEGIN
+    SELECT u.Username, i.[Name]
+    FROM [User] u
+    INNER JOIN [Item] i ON u.Id = i.SellerId
+    WHERE u.Username = @Username;
+END;
 
-go
+CREATE PROCEDURE UserBids 
+    @Username NVARCHAR(50)
+AS
+BEGIN
+    SELECT u.Username, b.Id
+    FROM [User] u
+    INNER JOIN [Bid] b ON u.Id = b.Bidder
+    WHERE u.Username = @Username;
+END;
 
-create procedure BidOnItem
-@BidPrice int,
-@ItemId int,
-@BidderId int
-as
-Begin
-	Declare @BaseBidPrice int;
+CREATE PROCEDURE ItemBids 
+    @Id INT
+AS
+BEGIN
+    SELECT i.[Name], b.Id
+    FROM [Item] i
+    INNER JOIN [Bid] b ON i.Id = b.ItemId
+    WHERE i.Id = @Id;
+END;
 
-	Select @BaseBidPrice = BaseBidPrice
-	from [Item]
-	where @ItemId = Id
+CREATE TRIGGER trDeleteUser
+ON [User]
+AFTER DELETE
+AS
+BEGIN
+    DECLARE @Id INT;
+    SELECT @Id = Id FROM deleted;
 
-	IF @BidPrice > @BaseBidPrice
-	Begin
-		Insert into [Bid](BidPrice,ItemId,Bidder)
-		values(@BidPrice,@ItemId,@BidderId)
-	End
-	ELSE
-	Begin
-		RAISERROR('BidPrice must be higher than BaseBidPrice.', 16, 1)
-	End
-End
+    DELETE i
+    FROM [Item] i
+    INNER JOIN [User] u ON i.SellerId = u.Id
+    WHERE i.SellerId = @Id;
 
-go
+    DELETE b
+    FROM [Bid] b
+    INNER JOIN [User] u ON b.Bidder = u.Id
+    WHERE b.Bidder = @Id;
+END;
 
-create procedure UserItems @Username nvarchar(50)
-as
-select Username,[Name]
-from [User] u
-inner join [Item] i on
-u.Id = i.SellerId
-where u.Username = @Username
+CREATE TRIGGER trDeleteItem
+ON [Item]
+AFTER DELETE
+AS
+BEGIN
+    DECLARE @Id INT;
+    SELECT @Id = Id FROM deleted;
 
-go
+    DELETE b
+    FROM [Bid] b
+    INNER JOIN [Item] i ON b.ItemId = i.Id
+    WHERE b.Bidder = @Id;
+END;
 
-create procedure UserBids @Username nvarchar(50)
-as
-select Username,b.Id
-from [User] u
-inner join [Bid] b on
-u.Id = b.Bidder
-where u.Username = @Username
-
-go
-
-
-create procedure ItemBids @Id int
-as
-select [Name], b.Id
-from [Item] i
-inner join [Bid] b on
-i.Id = b.ItemId
-where i.Id = @Id
-
-go
-
-
-create trigger trDeleteUser
-on [User]
-after delete
-as
-Begin
-	Declare @Id int
-	select @Id = Id from deleted
-
-	delete i
-	from [Item] i
-	inner join [User] u
-	on i.SellerId = u.Id
-	where i.SellerId = @Id
-
-	delete b
-	from [Bid] b
-	inner join [User] u
-	on b.Bidder = u.Id
-	where b.Bidder = @Id
-End
-
-go
-
-create trigger trDeleteItem
-on [Item]
-after delete
-as
-Begin
-	Declare @Id int
-	select @Id = Id from deleted
-
-	delete b
-	from [Bid] b
-	inner join [Item] i
-	on b.Bidder = i.Id
-	where b.Bidder = @Id
-End
-
-go
-
-create trigger trRemovePreviousBidder
-on [Bid]
-after insert
-as
-Begin
-	create table #PreviousBidder (
+CREATE TRIGGER trRemovePreviousBidder
+ON [Bid]
+AFTER INSERT
+AS
+BEGIN
+    CREATE TABLE #PreviousBidder (
         ItemId INT,
         PreviousBidderId INT
     );
-	
-	insert into #PreviousBidder (ItemId, PreviousBidderId)
-    select i.ItemId, b.Bidder
-    from inserted i
-    join Bid b on i.ItemId = b.ItemId
-    where b.Id < (select MAX(Id) from inserted where ItemId = i.ItemId);
 
-	delete b
-	from [Bid] b
-	inner join #PreviousBidder pb on b.ItemId = pb.ItemId
-	where b.Bidder = pb.PreviousBidderId
-	
-	drop table #PreviousBidder
-end
+    INSERT INTO #PreviousBidder (ItemId, PreviousBidderId)
+    SELECT i.ItemId, b.Bidder
+    FROM inserted i
+    JOIN Bid b ON i.ItemId = b.ItemId
+    WHERE b.Id < (SELECT MAX(Id) FROM inserted WHERE ItemId = i.ItemId);
+
+    DELETE b
+    FROM [Bid] b
+    INNER JOIN #PreviousBidder pb ON b.ItemId = pb.ItemId
+    WHERE b.Bidder = pb.PreviousBidderId;
+
+    DROP TABLE #PreviousBidder;
+END;
