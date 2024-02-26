@@ -11,25 +11,31 @@ CREATE TABLE [User](
     CONSTRAINT PK_User PRIMARY KEY(Id)
 );
 
+go
+
 CREATE TABLE [Item](
     Id INT IDENTITY(1,1),
     [Name] VARCHAR(50) NOT NULL,
     BuyOutPrice INT NOT NULL,
     BaseBidPrice INT NOT NULL,
-    SellerId INT NOT NULL,
+    SellerId INT,
     CONSTRAINT PK_Item PRIMARY KEY(Id),
-    CONSTRAINT FK_Item_User FOREIGN KEY(SellerId) REFERENCES [User](Id)
+    CONSTRAINT FK_Item_User FOREIGN KEY(SellerId) REFERENCES [User](Id) ON DELETE SET NULL
 );
+
+go
 
 CREATE TABLE [Bid](
     Id INT IDENTITY(1,1),
     BidPrice INT NOT NULL,
-    ItemId INT NOT NULL,
-    Bidder INT NOT NULL,
+    ItemId INT,
+    Bidder INT,
     CONSTRAINT PK_Bid PRIMARY KEY(Id),
-    CONSTRAINT FK_Bid_User FOREIGN KEY(Bidder) REFERENCES [User](Id),
-    CONSTRAINT FK_Bid_Item FOREIGN KEY(ItemId) REFERENCES [Item](Id)
+    CONSTRAINT FK_Bid_User FOREIGN KEY(Bidder) REFERENCES [User](Id) ON DELETE SET NULL,
+    CONSTRAINT FK_Bid_Item FOREIGN KEY(ItemId) REFERENCES [Item](Id) ON DELETE SET NULL
 );
+
+go
 
 CREATE PROCEDURE CreateUser 
     @Username NVARCHAR(50)
@@ -38,6 +44,8 @@ BEGIN
     INSERT INTO [User](Username)
     VALUES (@Username);
 END;
+
+go
 
 CREATE PROCEDURE AddItem 
     @Name NVARCHAR(50),
@@ -49,6 +57,8 @@ BEGIN
     INSERT INTO [Item]([Name], BuyOutPrice, BaseBidPrice, SellerId)
     VALUES (@Name, @BuyOutPrice, @BaseBidPrice, @SellerId);
 END;
+
+go
 
 CREATE PROCEDURE BidOnItem 
     @BidPrice INT,
@@ -93,6 +103,8 @@ BEGIN
     END;
 END;
 
+go
+
 CREATE PROCEDURE UserItems 
     @Username NVARCHAR(50)
 AS
@@ -102,6 +114,8 @@ BEGIN
     INNER JOIN [Item] i ON u.Id = i.SellerId
     WHERE u.Username = @Username;
 END;
+
+go
 
 CREATE PROCEDURE UserBids 
     @Username NVARCHAR(50)
@@ -113,6 +127,8 @@ BEGIN
     WHERE u.Username = @Username;
 END;
 
+go
+
 CREATE PROCEDURE ItemBids 
     @Id INT
 AS
@@ -123,38 +139,33 @@ BEGIN
     WHERE i.Id = @Id;
 END;
 
+go
 CREATE TRIGGER trDeleteUser
 ON [User]
 AFTER DELETE
 AS
 BEGIN
-    DECLARE @Id INT;
-    SELECT @Id = Id FROM deleted;
+    DELETE FROM [Bid]
+    WHERE Bidder IS NULL;
 
-    DELETE i
-    FROM [Item] i
-    INNER JOIN [User] u ON i.SellerId = u.Id
-    WHERE i.SellerId = @Id;
 
-    DELETE b
-    FROM [Bid] b
-    INNER JOIN [User] u ON b.Bidder = u.Id
-    WHERE b.Bidder = @Id;
+    DELETE FROM [Item]
+    WHERE SellerId IS NULL;
+
 END;
+
+go
 
 CREATE TRIGGER trDeleteItem
 ON [Item]
 AFTER DELETE
 AS
 BEGIN
-    DECLARE @Id INT;
-    SELECT @Id = Id FROM deleted;
-
-    DELETE b
-    FROM [Bid] b
-    INNER JOIN [Item] i ON b.ItemId = i.Id
-    WHERE b.Bidder = @Id;
+    DELETE FROM [Bid]
+    WHERE ItemId IS NULL;
 END;
+
+go
 
 CREATE TRIGGER trRemovePreviousBidder
 ON [Bid]
@@ -179,3 +190,5 @@ BEGIN
 
     DROP TABLE #PreviousBidder;
 END;
+
+
